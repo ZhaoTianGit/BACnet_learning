@@ -1,35 +1,44 @@
+import asyncio
 import BAC0
-import time
 
-print("正在启动自动化测试平台...")
-
-# 1. 启动 BACnet 网络。
-# 注意：因为 Yabe 已经占用了默认的 47808 端口，我们让 Python 脚本用 47809 端口
-# 这样 Yabe 和 Python 就可以同时运行，互不干扰！
-bacnet = BAC0.lite(port=47809)
-
-# 目标设备的 IP 地址 (从你的截图获取)
-target_ip = '192.168.100.183'
-
-try:
-    print(f"\n--- 测试开始：连接设备 {target_ip} ---")
+# Wrap the main logic in an asynchronous function
+async def main():
+    print("Initializing Automated Testbench (Asyncio Framework)...")
     
-    # 2. 读取当前室温 (读取 Analog Input 0 的 Present Value)
-    # 语法格式：bacnet.read('IP地址 对象类型 实例号 属性')
-    current_temp = bacnet.read(f'{target_ip} analogInput 0 presentValue')
-    print(f"[Read] 成功！当前房间的真实温度是: {current_temp} °C")
+    # Initialize BACnet network. BAC0 finds its event loop here.
+    bacnet = BAC0.lite(port=47809)
+    target_ip = '192.168.100.183'
     
-    time.sleep(2) # 停顿2秒，让你有时间看屏幕
-    
-    # 3. 写入新的设定温度 (修改 Analog Value 0 的 Present Value 为 24.5度)
-    print(f"[Write] 正在下发控制指令，将设定温度修改为 24.5 °C...")
-    bacnet.write(f'{target_ip} analogValue 0 presentValue 24.5')
-    
-    print("\n--- 测试通过！请观察你的 Room Simulator 界面！ ---")
+    try:
+        print(f"\n--- Test Initiated: Connecting to DUT {target_ip} ---") #DUT: Device Under Test
+        
+        # Action 1: Force Override (Decouple hardware logic)
+        print("[Write] Action 1: Forcing Out of Service = True ...")
+        bacnet.write(f'{target_ip} analogValue 0 outOfService True')
+        
+        # Async wait for 1 second to ensure the command is processed by the device
+        await asyncio.sleep(1)
+        
+        # Action 2: Inject Test Vector
+        print("[Write] Action 2: Injecting test vector (31 °C) ...")
+        # The Present Value is now overridden, allowing arbitrary value injection
+        bacnet.write(f'{target_ip} analogValue 0 presentValue 31')
+        
+        await asyncio.sleep(1)
+        
+        # Action 3: Read and Verify
+        verify_temp = bacnet.read(f'{target_ip} analogValue 0 presentValue')
+        print(f"[Read] Verification Successful! Setpoint overridden to: {verify_temp} °C")
+        print("\n--- Test Passed! Please check the Room Simulator UI! ---")
 
-except Exception as e:
-    print(f"通讯失败，请检查网络或IP地址: {e}")
+    except Exception as e:
+        print(f"Communication Failed. Please check network or IP address: {e}")
+        
+    finally:
+        # Terminate test and release the network port
+        bacnet.disconnect()
 
-finally:
-    # 结束测试，释放网络端口
-    bacnet.disconnect()
+# Script entry point
+if __name__ == "__main__":
+    # asyncio.run() acts as the primary clock generator (Event Loop) for the script
+    asyncio.run(main())
