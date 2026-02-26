@@ -4,8 +4,21 @@ import BAC0
 from rich import print
 from rich.traceback import install
 
-# 这行代码的魔法：让系统抛出的 Error 也变得极其美观且高亮！
-install(show_locals=False) 
+# Intercept system errors and apply beautiful syntax highlighting to the traceback
+install(show_locals=False)
+
+# =================================================================
+# 🚨 WINDOWS & PYTHON 3.13 HOTFIX (The "Monkey Patch" Technique)
+# =================================================================
+if sys.platform == 'win32':
+    import asyncio.base_events
+    # Dynamically overwrite Python 3.13's underlying check function in memory to return None.
+    # This perfectly bypasses the ValueError crash without modifying any 3rd-party source files!
+    asyncio.base_events._set_reuseport = lambda sock: None
+    
+    # Maintain a UDP-friendly network engine policy for Windows
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# =================================================================
 
 async def main():
     print("[bold magenta]Initializing Automated Testbench (Asyncio Framework)...[/bold magenta]")
@@ -19,14 +32,13 @@ async def main():
         
         # Action 1: Force Override (Decouple hardware logic)
         print("[yellow][Write][/yellow] Action 1: Forcing Out of Service = [bold green]True[/bold green] ...")
-        # Fix: .write() is synchronous and returns None, do NOT use await here.
+        # .write() is synchronous and returns None, do NOT use await here.
         bacnet.write(f'{target_ip} analogValue 0 outOfService True')
         
         await asyncio.sleep(1)
         
         # Action 2: Inject Test Vector
         print("[yellow][Write][/yellow] Action 2: Injecting test vector ([bold red]31 °C[/bold red]) ...")
-        # Fix: .write() is synchronous, do NOT use await here.
         bacnet.write(f'{target_ip} analogValue 0 presentValue 31')
         
         await asyncio.sleep(1)
@@ -42,11 +54,9 @@ async def main():
         print(f"[bold white on red] Communication Failed [/bold white on red] {e}")
         
     finally:
+        # Disconnect gracefully to release the port
         bacnet.disconnect()
 
 if __name__ == "__main__":
-    # OS-specific fix for Windows UDP socket issue (DO NOT DELETE)
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
+    # The Event Loop is started here AFTER the Monkey Patch has been applied
     asyncio.run(main())
