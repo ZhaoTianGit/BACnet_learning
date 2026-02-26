@@ -1,3 +1,4 @@
+from rich import print # <--- The magic wand for terminal readability!
 import asyncio
 import sys
 import BAC0
