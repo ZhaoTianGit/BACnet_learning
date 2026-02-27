@@ -4,7 +4,6 @@ import BAC0
 from rich import print
 from rich.traceback import install
 
-# Intercept system errors and apply beautiful syntax highlighting to the traceback
 install(show_locals=False)
 
 # =================================================================
@@ -12,30 +11,32 @@ install(show_locals=False)
 # =================================================================
 if sys.platform == 'win32':
     import asyncio.base_events
-    # Dynamically overwrite Python 3.13's underlying check function in memory to return None.
-    # This perfectly bypasses the ValueError crash without modifying any 3rd-party source files!
     asyncio.base_events._set_reuseport = lambda sock: None
-    
-    # Maintain a UDP-friendly network engine policy for Windows
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-# =================================================================
 
 async def main():
     print("[bold magenta]Initializing Automated Testbench (Asyncio Framework)...[/bold magenta]")
     
-    # Initialize BACnet network.
     bacnet = BAC0.lite(port=47809)
-    # Explicitly target the IP and the standard BACnet port (47808)
+    # Explicit point-to-point targeting for the clean room setup
     target_ip = '192.168.100.183:47808'
-    #target_ip = '192.168.100.183:63049' #<-- 动态端口的陷阱 (Ephemeral Ports) Append the default BACnet port explicitly to cross the port boundary
-    #target_ip = '192.168.100.183' #<-- This would cause a port boundary error without the port specified (Explicit Port Routing)
     
     try:
+        # ==========================================================
+        # 📡 PHASE 0: THE RADAR PING (Global Bus Enumeration)
+        # ==========================================================
+        print("\n[bold yellow]📡 Phase 0: Network Sweeping (Global Who-Is Broadcast)...[/bold yellow]")
+        bacnet.whois()          # Broadcast to the entire subnet
+        await asyncio.sleep(2)  # Wait 2 seconds for the DUT to reply (I-Am)
+        
+        # Print the routing cache to verify the DUT is locked in
+        print(f"[bold cyan]Discovered Devices on Bus: {bacnet.devices}[/bold cyan]")
+        # ==========================================================
+
         print(f"\n[bold cyan]--- Test Initiated: Connecting to DUT {target_ip} ---[/bold cyan]")
         
-        # Action 1: Force Override (Decouple hardware logic)
+        # Action 1: Force Override
         print("[yellow][Write][/yellow] Action 1: Forcing Out of Service = [bold green]True[/bold green] ...")
-        # .write() is synchronous and returns None, do NOT use await here.
         bacnet.write(f'{target_ip} analogValue 0 outOfService True')
         
         await asyncio.sleep(1)
@@ -47,7 +48,6 @@ async def main():
         await asyncio.sleep(1)
         
         # Action 3: Read and Verify
-        # KEEP await here: .read() needs to wait for the network packet to return
         verify_temp = await bacnet.read(f'{target_ip} analogValue 0 presentValue')
         print(f"[blue][Read][/blue] Verification Successful! Setpoint overridden to: [bold green]{verify_temp} °C[/bold green]")
         
@@ -57,9 +57,7 @@ async def main():
         print(f"[bold white on red] Communication Failed [/bold white on red] {e}")
         
     finally:
-        # Disconnect gracefully to release the port
         bacnet.disconnect()
 
 if __name__ == "__main__":
-    # The Event Loop is started here AFTER the Monkey Patch has been applied
     asyncio.run(main())
