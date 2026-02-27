@@ -25,7 +25,10 @@ async def main():
     
     # Initialize BACnet network.
     bacnet = BAC0.lite(port=47809)
-    target_ip = '192.168.100.183'
+    # Explicitly target the IP and the standard BACnet port (47808)
+    target_ip = '192.168.100.183:47808'
+    #target_ip = '192.168.100.183:63049' #<-- 动态端口的陷阱 (Ephemeral Ports) Append the default BACnet port explicitly to cross the port boundary
+    #target_ip = '192.168.100.183' #<-- This would cause a port boundary error without the port specified (Explicit Port Routing)
     
     try:
         print(f"\n[bold cyan]--- Test Initiated: Connecting to DUT {target_ip} ---[/bold cyan]")
