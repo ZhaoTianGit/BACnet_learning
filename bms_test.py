@@ -12,39 +12,62 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 async def main():
-    print("[bold magenta]Initializing Testbench (Sniper Mode v4)...[/bold magenta]")
+    print("[bold magenta]Initializing Testbench (Sniper Mode v6 - WhoIs First)...[/bold magenta]")
 
-    # Loopback adapter IP — must be different from 192.168.100.183
     bacnet = BAC0.lite(ip='192.168.100.200', port=47810)
-
-    # Give BAC0's internal async tasks time to fully initialize
     await asyncio.sleep(3)
 
-    target_ip = '192.168.100.183:52025'
-    OBJ = 'analogValue 0'
+    target_ip   = '192.168.100.183:52025'
+    DEVICE_ID   = 3506259   # confirmed from Yabe
+    OBJ         = 'analogValue 0'
 
     try:
-        print(f"\n[cyan]--- Test: {target_ip} | {OBJ} ---[/cyan]")
+        # ── STEP 0: Discover & Register the Device ──────────────────────────────
+        # This is the missing step — BAC0 must know the device exists before
+        # it can address WriteProperty / ReadProperty to it.
+        print(f"\n[cyan]--- Step 0: WhoIs → discovering device {DEVICE_ID} ---[/cyan]")
+        bacnet.whoIs(
+            low_limit=DEVICE_ID,
+            high_limit=DEVICE_ID,
+            destination=target_ip   # unicast directly, no broadcast needed
+        )
+        await asyncio.sleep(3)      # wait for IAm to come back and register
 
-        # Step 1: Enable Out Of Service
-        print("[yellow][Write][/yellow] outOfService → True ...")
+        # Confirm the device was registered
+        devices_found = bacnet.discoveredDevices
+        print(f"[cyan]  Discovered devices: {devices_found}[/cyan]")
+
+        if not devices_found:
+            print("[bold red]  ⚠ No devices discovered! Check subnet routing below.[/bold red]")
+            print("[yellow]  Run: ping 192.168.100.183  ← from your terminal[/yellow]")
+            print("[yellow]  If that fails, the two NICs can't talk — see routing fix below.[/yellow]")
+            return
+
+        # ── STEP 1: Write Out Of Service ─────────────────────────────────────────
+        print(f"\n[yellow][Write 1][/yellow] outOfService → True ...")
         bacnet.write(f'{target_ip} {OBJ} outOfService True')
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-        # Step 2: Write present value with priority
-        print("[yellow][Write][/yellow] presentValue → 31 @ priority 8 ...")
+        # ── STEP 2: Confirm Out Of Service landed ────────────────────────────────
+        oos = await bacnet.read(f'{target_ip} {OBJ} outOfService')
+        print(f"[blue]  outOfService readback = [bold]{oos}[/bold][/blue]")
+        if not oos:
+            print("[bold red]  ⚠ outOfService still False — write did not land![/bold red]")
+            return
+
+        # ── STEP 3: Inject test vector ───────────────────────────────────────────
+        print(f"[yellow][Write 2][/yellow] presentValue → 31 @ priority 8 ...")
         bacnet.write(f'{target_ip} {OBJ} presentValue 31 - 8')
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-        # Step 3: Read back result
-        try:
-            result = bacnet.read(f'{target_ip} {OBJ} presentValue')
-            print(f"[blue][Read][/blue] Result: [bold green]{result} °C[/bold green]")
-        except Exception as e:
-            print(f"[bold red][Read Failed][/bold red] {e}")
-            print("[yellow]>>> Check Simulator UI — T Set should show 31 <<<[/yellow]")
+        # ── STEP 4: Verify ───────────────────────────────────────────────────────
+        result = await bacnet.read(f'{target_ip} {OBJ} presentValue')
+        print(f"[blue][Read][/blue] presentValue = [bold green]{result} °C[/bold green]")
 
-        print("\n[bold black on green]--- Sequence Complete ---[/bold black on green]")
+        if result == 31.0:
+            print("\n[bold black on green] ✅ SUCCESS — T Set is now 31°C! [/bold black on green]")
+        else:
+            print(f"\n[bold yellow] ⚠ Got {result}, expected 31. Priority array may need relinquishing. [/bold yellow]")
 
     except Exception as e:
         print(f"[bold white on red] Fatal [/bold white on red] {e}")
@@ -52,4 +75,4 @@ async def main():
         bacnet.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(main())  # This provides the running event loop BAC0 needs
+    asyncio.run(main())
