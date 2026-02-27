@@ -1,78 +1,73 @@
 import asyncio
 import sys
-import BAC0
-from rich import print
-from rich.traceback import install
-
-install(show_locals=False)
 
 if sys.platform == 'win32':
     import asyncio.base_events
     asyncio.base_events._set_reuseport = lambda sock: None
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+from bacpypes3.ipv4.app import NormalApplication
+from bacpypes3.local.device import DeviceObject
+from bacpypes3.pdu import Address
+from bacpypes3.primitivedata import Real, Boolean, ObjectIdentifier
+from bacpypes3.basetypes import PropertyIdentifier
+from rich import print
+
+TARGET = Address("192.168.100.183:52025")
+
+# ── FIX: Use ObjectIdentifier object, not a tuple ────────────────────────────
+OBJ_ID = ObjectIdentifier("analog-value,0")
+
 async def main():
-    print("[bold magenta]Initializing Testbench (Sniper Mode v6 - WhoIs First)...[/bold magenta]")
+    print("[bold magenta]bacpypes3 Direct Mode (v14)...[/bold magenta]")
 
-    bacnet = BAC0.lite(ip='192.168.100.200', port=47810)
-    await asyncio.sleep(3)
-
-    target_ip   = '192.168.100.183:52025'
-    DEVICE_ID   = 3506259   # confirmed from Yabe
-    OBJ         = 'analogValue 0'
+    device = DeviceObject(
+        objectIdentifier=("device", 9999),
+        objectName="TestBench",
+        vendorIdentifier=999,
+    )
+    app = NormalApplication(device, Address("192.168.100.183:47810"))
+    await asyncio.sleep(1)
 
     try:
-        # ── STEP 0: Discover & Register the Device ──────────────────────────────
-        # This is the missing step — BAC0 must know the device exists before
-        # it can address WriteProperty / ReadProperty to it.
-        print(f"\n[cyan]--- Step 0: WhoIs → discovering device {DEVICE_ID} ---[/cyan]")
-        bacnet.whoIs(
-            low_limit=DEVICE_ID,
-            high_limit=DEVICE_ID,
-            destination=target_ip   # unicast directly, no broadcast needed
+        # ── Write 1: outOfService ─────────────────────────────────────────────
+        print("\n[yellow][Write 1][/yellow] outOfService → True ...")
+        await app.write_property(
+            TARGET, OBJ_ID,
+            PropertyIdentifier("out-of-service"),
+            Boolean(True),
         )
-        await asyncio.sleep(3)      # wait for IAm to come back and register
+        print("[green]  ✅ Write 1 ACKed![/green]")
+        await asyncio.sleep(1)
 
-        # Confirm the device was registered
-        devices_found = bacnet.discoveredDevices
-        print(f"[cyan]  Discovered devices: {devices_found}[/cyan]")
+        # ── Write 2: presentValue @ priority 8 ───────────────────────────────
+        print("[yellow][Write 2][/yellow] presentValue → 31 @ priority 8 ...")
+        await app.write_property(
+            TARGET, OBJ_ID,
+            PropertyIdentifier("present-value"),
+            Real(31.0),
+            priority=8,
+        )
+        print("[green]  ✅ Write 2 ACKed![/green]")
+        await asyncio.sleep(1)
 
-        if not devices_found:
-            print("[bold red]  ⚠ No devices discovered! Check subnet routing below.[/bold red]")
-            print("[yellow]  Run: ping 192.168.100.183  ← from your terminal[/yellow]")
-            print("[yellow]  If that fails, the two NICs can't talk — see routing fix below.[/yellow]")
-            return
+        # ── Read back ─────────────────────────────────────────────────────────
+        print("[blue][Read][/blue] presentValue ...")
+        result = await app.read_property(
+            TARGET, OBJ_ID,
+            PropertyIdentifier("present-value"),
+        )
+        print(f"[blue]  Result: [bold green]{result} °C[/bold green][/blue]")
 
-        # ── STEP 1: Write Out Of Service ─────────────────────────────────────────
-        print(f"\n[yellow][Write 1][/yellow] outOfService → True ...")
-        bacnet.write(f'{target_ip} {OBJ} outOfService True')
-        await asyncio.sleep(3)
-
-        # ── STEP 2: Confirm Out Of Service landed ────────────────────────────────
-        oos = await bacnet.read(f'{target_ip} {OBJ} outOfService')
-        print(f"[blue]  outOfService readback = [bold]{oos}[/bold][/blue]")
-        if not oos:
-            print("[bold red]  ⚠ outOfService still False — write did not land![/bold red]")
-            return
-
-        # ── STEP 3: Inject test vector ───────────────────────────────────────────
-        print(f"[yellow][Write 2][/yellow] presentValue → 31 @ priority 8 ...")
-        bacnet.write(f'{target_ip} {OBJ} presentValue 31 - 8')
-        await asyncio.sleep(3)
-
-        # ── STEP 4: Verify ───────────────────────────────────────────────────────
-        result = await bacnet.read(f'{target_ip} {OBJ} presentValue')
-        print(f"[blue][Read][/blue] presentValue = [bold green]{result} °C[/bold green]")
-
-        if result == 31.0:
+        if float(result) == 31.0:
             print("\n[bold black on green] ✅ SUCCESS — T Set is now 31°C! [/bold black on green]")
-        else:
-            print(f"\n[bold yellow] ⚠ Got {result}, expected 31. Priority array may need relinquishing. [/bold yellow]")
 
     except Exception as e:
         print(f"[bold white on red] Fatal [/bold white on red] {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        bacnet.disconnect()
+        app.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
