@@ -12,21 +12,20 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 async def main():
-    print("[bold magenta]Initializing Automated Testbench (Sniper Mode)...[/bold magenta]")
+    print("[bold magenta]Initializing Automated Testbench (Sniper Mode v2)...[/bold magenta]")
     
-    # 将 Python 绑定到物理 IP，并使用一个完全不冲突的端口 (47810)
-    my_ip = '192.168.100.183'
-    bacnet = BAC0.lite(ip=my_ip, port=47810)
+    # 🚨 核心改动 1: 绑定到 0.0.0.0，绕过 Windows 的同 IP UDP 拦截策略
+    bacnet = BAC0.lite(ip='0.0.0.0', port=47810)
     
-    # 🚨 精准狙击：填入 Yabe 探测到的真实端口 52025
-    target_ip = f'{my_ip}:52025'
+    # 🚨 请确保这个是你用 Yabe 抓到的最新动态端口
+    target_ip = '192.168.100.183:52025'
     
     try:
         print(f"\n[bold cyan]--- Test Initiated: Connecting to DUT {target_ip} ---[/bold cyan]")
         
-        # Action 1: Force Override
-        print("[yellow][Write][/yellow] Action 1: Forcing Out of Service = [bold green]True[/bold green] ...")
-        bacnet.write(f'{target_ip} analogValue 0 outOfService True')
+        # Action 1: Force Override (核心改动 2: 使用更符合 BACnet 标准的 active 代替 True)
+        print("[yellow][Write][/yellow] Action 1: Forcing Out of Service = [bold green]active[/bold green] ...")
+        bacnet.write(f'{target_ip} analogValue 0 outOfService active')
         
         await asyncio.sleep(1)
         
